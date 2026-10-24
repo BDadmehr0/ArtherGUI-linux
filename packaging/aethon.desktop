@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Aethon VPN
+GenericName=VPN Client
+Comment=Connect through Aether with system-wide TUN routing or a local SOCKS5 proxy
+Exec=aethon
+Icon=aethon
+Terminal=false
+Categories=Network;Utility;
+Keywords=VPN;Aether;proxy;WireGuard;MASQUE;
+StartupWMClass=aethon
