@@ -298,14 +298,30 @@ impl Settings {
         }
         for path in &self.split_applications {
             let path = Path::new(path);
-            if !path.is_absolute()
+            // Windows entries are absolute .exe paths (Start-Menu targets).
+            // Elsewhere executables carry no extension contract, so the
+            // requirement is just an absolute path with no NUL. Values stored
+            // by the other platform are never "repaired" away implicitly:
+            // Linux refuses split modes at the routing layer instead, and a
+            // Windows .exe entry saved in a shared backup simply stays inert
+            // here until the mode that would use it is selected.
+            #[cfg(windows)]
+            let invalid = !path.is_absolute()
                 || path
                     .extension()
                     .and_then(|v| v.to_str())
                     .map(|v| !v.eq_ignore_ascii_case("exe"))
-                    .unwrap_or(true)
-            {
-                return Err("Split-tunnel applications must be absolute .exe paths".into());
+                    .unwrap_or(true);
+            #[cfg(not(windows))]
+            let invalid = !path.is_absolute()
+                || path.to_string_lossy().contains('\0');
+            if invalid {
+                return Err(if cfg!(windows) {
+                    "Split-tunnel applications must be absolute .exe paths"
+                } else {
+                    "Split-tunnel applications must be absolute paths"
+                }
+                .into());
             }
         }
         for cidr in &self.route_exclusions {

@@ -247,6 +247,50 @@ async fn checksum_from_manifest(
         .ok_or_else(|| format!("No SHA-256 checksum was found for {installer_name}"))
 }
 
+/// Linux update check: version discovery only. There is no Linux
+/// installer asset to download (the AUR-style package is rebuilt from
+/// source), so this reports availability + release notes and points the
+/// UI at the release page, while `download_update`/`install_update`
+/// refuse with package-manager instructions. What it must never do is
+/// what the Windows path below does: select `...-Windows-x64-Installer.exe`.
+#[cfg(target_os = "linux")]
+async fn latest_update_linux(
+    releases: Vec<GithubRelease>,
+) -> Result<UpdateInfo, String> {
+    let current = env!("CARGO_PKG_VERSION");
+    // The releases API is newest-first; the first parseable version is the
+    // newest upstream release, whether or not it is newer than us.
+    let newest = releases
+        .iter()
+        .find(|release| version_parts(&release.tag_name).is_some());
+    Ok(match newest {
+        Some(release) => {
+            let latest = normalized_version(&release.tag_name).to_string();
+            UpdateInfo {
+                available: is_newer_version(&latest, current),
+                current_version: current.into(),
+                latest_version: latest,
+                release_tag: release.tag_name.clone(),
+                release_notes: release.body.clone().unwrap_or_default(),
+                download_url: format!(
+                    "https://github.com/hamvex/AetherGUI/releases/tag/{}",
+                    release.tag_name
+                ),
+                sha256: String::new(),
+            }
+        }
+        None => UpdateInfo {
+            available: false,
+            current_version: current.into(),
+            latest_version: current.into(),
+            release_tag: String::new(),
+            release_notes: String::new(),
+            download_url: String::new(),
+            sha256: String::new(),
+        },
+    })
+}
+
 async fn latest_update() -> Result<UpdateInfo, String> {
     let http = client()?;
     let releases = http
@@ -259,6 +303,10 @@ async fn latest_update() -> Result<UpdateInfo, String> {
         .json::<Vec<GithubRelease>>()
         .await
         .map_err(|error| format!("Invalid update metadata: {error}"))?;
+    #[cfg(target_os = "linux")]
+    {
+        return latest_update_linux(releases).await;
+    }
     // Single-sourced from Cargo.toml so the installed version can never drift away from the
     // package version and silently offer the running build to itself as an update.
     let current = env!("CARGO_PKG_VERSION");
@@ -340,6 +388,18 @@ pub async fn download_update(
     app: AppHandle,
     state: tauri::State<'_, UpdateState>,
 ) -> Result<String, String> {
+    // Linux has no self-installer to fetch: updates arrive by rebuilding
+    // the Arch package. Refuse before anything is downloaded so a Windows
+    // installer can never land on a Linux system through this path.
+    if cfg!(target_os = "linux") {
+        let _ = (&app, &state);
+        return Err(
+            "On Linux, Aethon updates arrive by rebuilding the package \
+             (makepkg -si in the PKGBUILD directory, or your AUR helper). \
+             The in-app updater only checks and reports new versions here."
+                .into(),
+        );
+    }
     let info = latest_update().await?;
     if !info.available {
         return Err("Aethon is already up to date".into());
@@ -444,6 +504,15 @@ pub async fn install_update(
     app: AppHandle,
     state: tauri::State<'_, UpdateState>,
 ) -> Result<(), String> {
+    if cfg!(target_os = "linux") {
+        let _ = (&app, &state);
+        return Err(
+            "On Linux, install updates by rebuilding the package \
+             (makepkg -si, or your AUR helper); the in-app updater does not \
+             install anything here."
+                .into(),
+        );
+    }
     let downloaded = state.downloaded.lock().await;
     let update = downloaded
         .as_ref()

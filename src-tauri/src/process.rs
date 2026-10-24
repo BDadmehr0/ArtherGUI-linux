@@ -28,7 +28,16 @@ pub struct StatusEvent {
 }
 
 pub const AETHER_VERSION: &str = "2.3.0";
+#[cfg(windows)]
 const AETHER_SHA256: &str = "4834bec4fa3b108275cac1b765d83aadf6b2fcae76ea74b00bfa3935f238e0c1";
+/// Linux: pin of the official `aether-linux-x86_64.tar.gz` payload,
+/// generated at build time from the digest-verified archive (build.rs).
+/// Empty when the build had no verified payload to pin, in which case
+/// `validate_core_binary` refuses to run anything (fail-closed).
+#[cfg(target_os = "linux")]
+const AETHER_SHA256: &str = crate::linux_pins::AETHER_SHA256;
+#[cfg(not(any(windows, target_os = "linux")))]
+const AETHER_SHA256: &str = "";
 
 /// Cumulative byte counters parsed from the core's `[=] up X down Y uptime ...` statistics
 /// lines (v2.1.0, `AETHER_STATS=1`). Authoritative user-facing traffic totals: they count
@@ -278,7 +287,7 @@ impl ProcessManager {
         // pins the exact file so PATH search can never substitute a different one.
         if chain.is_some() {
             let pt_dir = core_pt_dir(&app);
-            let psiphon_bin = pt_dir.join("psiphon-tunnel-core.exe");
+            let psiphon_bin = pt_dir.join(psiphon_helper_name());
             if psiphon_bin.is_file() {
                 env.insert(
                     "AETHER_PSIPHON_BIN".into(),
@@ -321,6 +330,25 @@ impl ProcessManager {
         emit_process_stage(&app, &settings, "aether_process_arguments_prepared");
         #[cfg(windows)]
         command.creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
+        // Linux equivalent of the Windows kill-on-close Job Object: if this
+        // GUI process dies for any reason (including SIGKILL, where Rust
+        // destructors never run), the kernel delivers SIGTERM to the core so
+        // no orphaned aether process keeps holding the SOCKS ports.
+        #[cfg(target_os = "linux")]
+        unsafe {
+            use std::os::unix::process::CommandExt;
+            command.pre_exec(|| {
+                if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM as usize) != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                // The parent may have died between fork and exec; if we have
+                // already been reparented, the pdeath signal will never come.
+                if libc::getppid() == 1 {
+                    libc::_exit(1);
+                }
+                Ok(())
+            });
+        }
         emit_status(&app, "scanning", None, Some("Starting Aether".into()));
         emit_process_stage(&app, &settings, "aether_process_spawn_requested");
         emit_process_stage(&app, &settings, "Aether_spawn_requested");
@@ -897,6 +925,22 @@ fn core_candidates(resource_dir: &std::path::Path, name: &str) -> Vec<std::path:
         resource_dir.join("binaries").join(name),
         resource_dir.join(name),
     ];
+    // Linux only: the Arch package installs the verified sidecars under
+    // /usr/lib/aethon and the GUI as /usr/bin/aethon, a layout Tauri's
+    // resource_dir does not know about. The digest check in
+    // validate_core_binary is what makes any of these paths trustworthy;
+    // widening the search never widens what is accepted. Windows keeps
+    // exactly its original two candidates (asserted by test).
+    #[cfg(target_os = "linux")]
+    {
+        candidates.push(std::path::PathBuf::from("/usr/lib/aethon").join(name));
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                candidates.push(dir.join(name));
+                candidates.push(dir.join("binaries").join(name));
+            }
+        }
+    }
     if cfg!(debug_assertions) {
         candidates.push(
             std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -953,10 +997,24 @@ fn core_pt_dir(app: &AppHandle) -> std::path::PathBuf {
             }
         }
     }
+    // Arch package layout: sidecars live under /usr/lib/aethon (see PKGBUILD).
+    #[cfg(target_os = "linux")]
+    candidates.push(std::path::PathBuf::from("/usr/lib/aethon/pt"));
     candidates
         .into_iter()
-        .find(|dir| dir.join("psiphon-tunnel-core.exe").is_file())
+        .find(|dir| dir.join(psiphon_helper_name()).is_file())
         .unwrap_or_else(|| resource_dir.join("binaries").join("pt"))
+}
+
+/// Bundled Psiphon helper file name for this platform. The upstream
+/// archives ship `pt/psiphon-tunnel-core.exe` on Windows and
+/// `pt/psiphon-tunnel-core` everywhere else.
+fn psiphon_helper_name() -> &'static str {
+    if cfg!(windows) {
+        "psiphon-tunnel-core.exe"
+    } else {
+        "psiphon-tunnel-core"
+    }
 }
 
 /// The read size used when hashing a bundled binary for its integrity check.
@@ -983,6 +1041,15 @@ pub(crate) fn hash_file(path: &std::path::Path) -> Result<String, String> {
 }
 
 fn validate_core_binary(path: &std::path::Path) -> Result<String, String> {
+    if AETHER_SHA256.is_empty() {
+        // No pin was generated for this build (Linux dev build without the
+        // fetch step). Refuse rather than execute an unverified core.
+        return Err(
+            "Bundled Aether integrity check failed: no core digest was pinned at build \
+             time. Run `npm run fetch:linux` (or build via the PKGBUILD) and rebuild."
+                .into(),
+        );
+    }
     let actual = hash_file(path)?;
     if actual != AETHER_SHA256 {
         return Err(format!(
@@ -1150,10 +1217,24 @@ mod tests {
         );
     }
 
+    // Asserts against the shipped Windows payload; the Linux twin below
+    // asserts against the Linux payload with its build-time pin.
+    #[cfg(windows)]
     #[test]
     fn pinned_aether_binary_has_expected_hash() {
         let binary = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("binaries/aether-x86_64-pc-windows-msvc.exe");
+        assert_eq!(
+            validate_core_binary(&binary).unwrap(),
+            "Aether v2.3.0 (SHA-256 verified)"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn pinned_linux_aether_binary_has_expected_hash() {
+        let binary = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("binaries/aether-x86_64-unknown-linux-gnu");
         assert_eq!(
             validate_core_binary(&binary).unwrap(),
             "Aether v2.3.0 (SHA-256 verified)"
@@ -1263,6 +1344,8 @@ mod tests {
     /// A remembered verdict must belong to the file that is about to be executed.
     /// Replacing the file behind the same path has to produce a fresh answer, or
     /// the cache would be a way to launder a refused binary into an accepted one.
+    /// (Windows-gated: it copies the genuine shipped Windows payload.)
+    #[cfg(windows)]
     #[test]
     fn a_replaced_file_does_not_inherit_the_cached_verdict() {
         let genuine = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -1286,6 +1369,9 @@ mod tests {
             format!("Aether v{AETHER_VERSION} (SHA-256 verified)")
         );
     }
+    // Windows paths and the exact Windows candidate list; Linux has its
+    // own additional system locations (see core_candidates).
+    #[cfg(windows)]
     #[test]
     fn the_release_build_does_not_search_the_build_tree_for_the_core() {
         let resources = std::path::Path::new(r"C:\Users\someone\AppData\Local\Aethon");

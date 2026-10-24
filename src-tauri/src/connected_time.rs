@@ -17,6 +17,10 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+// The non-Windows clock paths use these unqualified; upstream never
+// compiled this file off Windows, so the import was missing entirely.
+#[cfg(not(windows))]
+use std::time::{SystemTime, UNIX_EPOCH};
 
 
 #[derive(Debug, Clone)]
@@ -73,13 +77,46 @@ pub fn system_clock() -> Clock {
 
 #[cfg(not(windows))]
 pub fn system_clock() -> Clock {
+    Clock {
+        // Was hard-coded to 0 in the non-Windows stub, which made every
+        // elapsed computation degenerate; use the real monotonic source.
+        monotonic_ms: monotonic_ms_now(),
+        local_date: local_date_now(),
+    }
+}
+
+/// Local calendar date (`YYYY-MM-DD`). On Linux this goes through
+/// `localtime_r` so the day boundary is the user's actual local midnight
+/// (the stub derived it from UTC, shifting the daily total by the UTC
+/// offset). Other non-Windows platforms keep the UTC-civil derivation.
+#[cfg(target_os = "linux")]
+fn local_date_now() -> String {
+    unsafe {
+        let raw = libc::time(std::ptr::null_mut());
+        let mut tm = std::mem::zeroed::<libc::tm>();
+        if libc::localtime_r(&raw, &mut tm).is_null() {
+            // Fall back to the civil derivation rather than failing the
+            // feature: worst case the day boundary is off for one day.
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default();
+            return unix_ms_to_local_date(now.as_millis() as u64);
+        }
+        format!(
+            "{:04}-{:02}-{:02}",
+            tm.tm_year + 1900,
+            tm.tm_mon + 1,
+            tm.tm_mday
+        )
+    }
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+fn local_date_now() -> String {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
-    Clock {
-        monotonic_ms: 0,
-        local_date: unix_ms_to_local_date(now.as_millis() as u64),
-    }
+    unix_ms_to_local_date(now.as_millis() as u64)
 }
 
 /// Monotonic milliseconds: Windows GetTickCount64 (immune to wall-clock changes, resets at
@@ -89,7 +126,27 @@ pub fn monotonic_ms_now() -> u64 {
     unsafe { windows_sys::Win32::System::SystemInformation::GetTickCount64() }
 }
 
-#[cfg(not(windows))]
+/// Linux monotonic milliseconds with GetTickCount64 semantics (since boot,
+/// from `/proc/uptime`), so checkpoint arithmetic survives process
+/// restarts the way the design intends. The process-relative `Instant`
+/// stub reset at every launch and silently broke reconciliation.
+#[cfg(target_os = "linux")]
+pub fn monotonic_ms_now() -> u64 {
+    if let Ok(uptime) = std::fs::read_to_string("/proc/uptime") {
+        if let Some(secs) = uptime
+            .split_whitespace()
+            .next()
+            .and_then(|v| v.parse::<f64>().ok())
+        {
+            return (secs * 1000.0) as u64;
+        }
+    }
+    use std::time::Instant;
+    static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    START.get_or_init(Instant::now).elapsed().as_millis() as u64
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 pub fn monotonic_ms_now() -> u64 {
     use std::time::Instant;
     static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();

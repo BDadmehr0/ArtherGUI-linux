@@ -77,3 +77,14 @@ native-inputs/*
 !native-inputs/android/
 native-inputs/android/*
 !native-inputs/android/*.json
+
+# Linux sidecars + generated build pins (same rule as the *.exe entries
+# above: fetched and verified by scripts/fetch-core-linux.sh, never
+# committed, so the verified download stays the only source of truth).
+src-tauri/binaries/aether-x86_64-unknown-linux-gnu
+src-tauri/binaries/xray-x86_64-unknown-linux-gnu
+src-tauri/binaries/pt/psiphon-tunnel-core
+src-tauri/binaries/pt/lyrebird
+src-tauri/binaries/aether-licenses/
+src-tauri/linux-binary-pins.json
+*.pkg.tar.*

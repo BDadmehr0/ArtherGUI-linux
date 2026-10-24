@@ -268,10 +268,68 @@ pub fn network_fingerprint() -> Option<String> {
                 .collect(),
         )
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        linux_network_fingerprint()
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
     {
         None
     }
+}
+
+/// Linux twin of the Windows fingerprint: hash of the default-route
+/// interface's name + MAC, resolved from procfs/sysfs (read while the
+/// tunnel is down, by the caller). Returns None - i.e. "full scan, remember
+/// nothing" - when the link cannot be named or is one of our own TUNs,
+/// exactly the Windows failure modes.
+#[cfg(target_os = "linux")]
+fn linux_network_fingerprint() -> Option<String> {
+    let routes = std::fs::read_to_string("/proc/net/route").ok()?;
+    let interface = linux_default_interface(&routes)?;
+    if interface.starts_with("aethon") {
+        return None;
+    }
+    let mac = std::fs::read_to_string(format!("/sys/class/net/{interface}/address"))
+        .ok()?
+        .trim()
+        .replace(':', "");
+    if mac.is_empty() || mac == "000000000000" {
+        return None;
+    }
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(interface.as_bytes());
+    hasher.update(b"/");
+    hasher.update(mac.to_ascii_lowercase().as_bytes());
+    Some(
+        hasher
+            .finalize()
+            .iter()
+            .take(8)
+            .map(|byte| format!("{byte:02x}"))
+            .collect(),
+    )
+}
+
+/// Lowest-metric IPv4 default-route interface from `/proc/net/route`.
+#[cfg(target_os = "linux")]
+fn linux_default_interface(proc_net_route: &str) -> Option<String> {
+    let mut best: Option<(u32, String)> = None;
+    for line in proc_net_route.lines().skip(1) {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        if fields.len() < 8 {
+            continue;
+        }
+        if fields[1] != "00000000" || fields[2] == "00000000" {
+            continue;
+        }
+        let metric: u32 = fields[6].parse().unwrap_or(u32::MAX);
+        if best.as_ref().map(|(m, _)| metric < *m).unwrap_or(true) {
+            best = Some((metric, fields[0].to_string()));
+        }
+    }
+    best.map(|(_, iface)| iface)
 }
 
 #[cfg(test)]
