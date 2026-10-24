@@ -92,9 +92,9 @@ pub fn system_clock() -> Clock {
 #[cfg(target_os = "linux")]
 fn local_date_now() -> String {
     unsafe {
-        let raw = libc::time(std::ptr::null_mut());
+        let epoch_secs = libc::time(std::ptr::null_mut());
         let mut tm = std::mem::zeroed::<libc::tm>();
-        if libc::localtime_r(&raw, &mut tm).is_null() {
+        if libc::localtime_r(&epoch_secs, &mut tm).is_null() {
             // Fall back to the civil derivation rather than failing the
             // feature: worst case the day boundary is off for one day.
             let now = SystemTime::now()

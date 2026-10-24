@@ -335,19 +335,21 @@ impl ProcessManager {
         // destructors never run), the kernel delivers SIGTERM to the core so
         // no orphaned aether process keeps holding the SOCKS ports.
         #[cfg(target_os = "linux")]
-        unsafe {
+        {
             use std::os::unix::process::CommandExt;
-            command.pre_exec(|| {
+            unsafe {
+                command.as_std_mut().pre_exec(|| {
                 if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM as usize) != 0 {
                     return Err(std::io::Error::last_os_error());
                 }
                 // The parent may have died between fork and exec; if we have
                 // already been reparented, the pdeath signal will never come.
-                if libc::getppid() == 1 {
-                    libc::_exit(1);
-                }
-                Ok(())
-            });
+                    if libc::getppid() == 1 {
+                        libc::_exit(1);
+                    }
+                    Ok(())
+                });
+            }
         }
         emit_status(&app, "scanning", None, Some("Starting Aether".into()));
         emit_process_stage(&app, &settings, "aether_process_spawn_requested");

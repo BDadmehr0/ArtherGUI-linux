@@ -255,7 +255,7 @@ async fn checksum_from_manifest(
 /// what the Windows path below does: select `...-Windows-x64-Installer.exe`.
 #[cfg(target_os = "linux")]
 async fn latest_update_linux(
-    releases: Vec<GithubRelease>,
+    releases: &[GithubRelease],
 ) -> Result<UpdateInfo, String> {
     let current = env!("CARGO_PKG_VERSION");
     // The releases API is newest-first; the first parseable version is the
@@ -305,7 +305,7 @@ async fn latest_update() -> Result<UpdateInfo, String> {
         .map_err(|error| format!("Invalid update metadata: {error}"))?;
     #[cfg(target_os = "linux")]
     {
-        return latest_update_linux(releases).await;
+        return latest_update_linux(&releases).await;
     }
     // Single-sourced from Cargo.toml so the installed version can never drift away from the
     // package version and silently offer the running build to itself as an update.

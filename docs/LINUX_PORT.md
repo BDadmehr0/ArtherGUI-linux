@@ -228,9 +228,17 @@ Actually executed in the sandbox:
   json.tool` on all JSON configs.
 - Upstream archive *existence and digests* confirmed through the
   GitHub API (`digest` field of the v2.3.0 / v26.3.27 assets).
+- Full Rust *syntax* parse of every `.rs` file with the tree-sitter
+  Rust grammar (zero errors in all ported files).
 
-Executed in GitHub Actions (`.github/workflows/linux.yml`, Arch Linux
-container, real compilation):
+Defined for GitHub Actions but **not yet run** — the workflow lives
+at `docs/ci/linux.yml.txt` because this environment's GitHub token
+cannot create workflow files; activate it by copying it to
+`.github/workflows/linux.yml` with a `workflows`-scoped token or the
+GitHub web UI (upstream's `release.yml` is preserved the same way at
+`docs/ci/upstream-release.yml.txt`). Until it runs green, treat the
+Rust side as syntax-checked, not compiler-verified. It executes
+(Arch Linux container, real compilation):
 
 - `cargo test --manifest-path src-tauri/Cargo.toml --locked`
 - `npm run fetch:linux` (real download → digest check → pins)

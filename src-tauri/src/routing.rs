@@ -535,6 +535,7 @@ impl RoutingRequest {
             return Err("Invalid routing session path".into());
         }
         #[cfg(windows)]
+        {
         if self.tun_interface.len() > 32
             || !self
                 .tun_interface
@@ -544,15 +545,18 @@ impl RoutingRequest {
         {
             return Err("Invalid Aethon TUN interface name".into());
         }
+        }
         // Linux interface names: 15 bytes max, and this string becomes an
         // argv element to `ip`/`nft` behind the privilege boundary, so the
         // charset is pinned to exactly what tun_interface_for_session emits.
         #[cfg(target_os = "linux")]
+        {
         if self.tun_interface.len() > 15
             || !self.tun_interface.starts_with("aethon")
             || !self.tun_interface[6..].chars().all(|c| c.is_ascii_digit())
         {
             return Err("Invalid Aethon TUN interface name".into());
+        }
         }
         if !matches!(self.tun_backend.as_str(), "xray" | "tun2proxy") {
             return Err("Invalid TUN backend".into());
@@ -753,18 +757,22 @@ pub fn helper_main(request_path: &Path) -> Result<(), String> {
     // (pkexec). Fail immediately with a clear message instead of half-way
     // through `ip` invocations if it was launched unprivileged.
     #[cfg(target_os = "linux")]
-    if unsafe { libc::geteuid() } != 0 {
-        return Err(
-            "The Aethon routing helper must run as root; it is started via pkexec by the GUI"
-                .into(),
-        );
+    {
+        if unsafe { libc::geteuid() } != 0 {
+            return Err(
+                "The Aethon routing helper must run as root; it is started via pkexec by the GUI"
+                    .into(),
+            );
+        }
     }
     // Detach from the GUI's session (post-authorization): the helper must
     // survive its parent long enough to notice the death and clean up, and
     // must not be killed by a terminal hangup directed at the GUI.
     #[cfg(target_os = "linux")]
-    unsafe {
-        libc::setsid();
+    {
+        unsafe {
+            libc::setsid();
+        }
     }
     let request = request;
     let result = (|| -> Result<(), String> {
