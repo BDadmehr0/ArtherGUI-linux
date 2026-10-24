@@ -690,8 +690,15 @@ pub async fn wait_for_socks(address: &str, timeout: Duration) -> Result<(), Stri
 
 fn xray_config(request: &RoutingRequest, physical_interface: &str) -> Value {
     let socket: SocketAddr = request.socks_address.parse().unwrap();
+    // On Windows, Xray's process attribution keeps the core's and Xray's
+    // own traffic out of the tunnel. Linux has no process attribution in
+    // Xray; the kernel-level cgroup/fwmark bypass (linux_net) does this
+    // job instead, so the rule list simply starts empty there.
+    #[cfg(windows)]
     let mut rules =
         vec![json!({"type":"field","process":["aether.exe","xray.exe"],"outboundTag":"direct"})];
+    #[cfg(not(windows))]
+    let mut rules: Vec<Value> = Vec::new();
     if request.dns_leak_protection {
         rules.push(json!({"type":"field","network":"tcp,udp","port":"53","outboundTag":"aether"}));
     }

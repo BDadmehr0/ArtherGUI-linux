@@ -339,7 +339,7 @@ impl ProcessManager {
             use std::os::unix::process::CommandExt;
             unsafe {
                 command.as_std_mut().pre_exec(|| {
-                if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM as usize) != 0 {
+                if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM as usize, 0, 0, 0) != 0 {
                     return Err(std::io::Error::last_os_error());
                 }
                 // The parent may have died between fork and exec; if we have

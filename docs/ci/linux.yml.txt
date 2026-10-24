@@ -47,10 +47,30 @@ jobs:
         run: npm test
 
       - name: Rust unit tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+        run: |
+          # --message-format short = one line per diagnostic; failures
+          # re-emit their errors as ::error:: annotations so they stay
+          # readable through the checks API (raw logs live on blob
+          # storage some environments cannot reach).
+          set +e
+          cargo test --manifest-path src-tauri/Cargo.toml --locked --message-format short 2>&1 | tee /tmp/cargo-test.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            { grep -E "error" /tmp/cargo-test.log | head -n 45 | while IFS= read -r line; do echo "::error::$line"; done; } || true
+            tail -n 30 /tmp/cargo-test.log
+          fi
+          exit $status
 
       - name: Full Tauri build (no bundling; PKGBUILD does the layout)
-        run: npm run build -- --no-bundle
+        run: |
+          set +e
+          npm run build -- --no-bundle 2>&1 | tee /tmp/tauri-build.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            { grep -E "^(error|warning)|-->|panicked" /tmp/tauri-build.log | head -n 45 | while IFS= read -r line; do echo "::error::$line"; done; } || true
+            tail -n 30 /tmp/tauri-build.log
+          fi
+          exit $status
 
       - name: Smoke tests (no desktop, no root networking)
         run: |
