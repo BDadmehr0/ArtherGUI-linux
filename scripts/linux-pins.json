@@ -1,0 +1,37 @@
+{
+  "_comment": [
+    "Linux sidecar archive pins, the counterpart of scripts/aether-pins.json.",
+    "Archive digests were taken from the GitHub release-asset API digest field",
+    "for CluvexStudio/Aether v2.3.0 (source commit",
+    "6175b67df370ab856bcee07fe85b524031903956, the same core both existing",
+    "clients pin) and XTLS/Xray-core v26.3.27 (the same Xray Windows pins).",
+    "scripts/fetch-core-linux.sh verifies each archive against these values",
+    "before extracting anything, then hashes the extracted payloads into",
+    "src-tauri/linux-binary-pins.json; build.rs turns those into the",
+    "compile-time pins the runtime enforces before exec, mirroring the",
+    "Windows AETHER_SHA256 / XRAY_SHA256 constants.",
+    "The pt/ helpers inside the Aether archive carry no separate payload pin",
+    "here because the verified archive digest already covers them (same",
+    "argument aether-pins.json makes); fetch-core-linux.sh records their",
+    "digests into linux-binary-pins.json for audit.",
+    "glibc build chosen deliberately: requires glibc >= 2.34, Arch/Omarchy",
+    "ship far newer. A -musl archive exists upstream for other systems."
+  ],
+  "schemaVersion": 1,
+  "aether": {
+    "version": "v2.3.0",
+    "sourceCommit": "6175b67df370ab856bcee07fe85b524031903956",
+    "archive": "aether-linux-x86_64.tar.gz",
+    "url": "https://github.com/CluvexStudio/Aether/releases/download/v2.3.0/aether-linux-x86_64.tar.gz",
+    "sha256": "77c6ce41695a616660d834b55be235c17e7588a474dfd737b71ca80b685bdc8a",
+    "binary": "aether",
+    "pt": ["pt/psiphon-tunnel-core", "pt/lyrebird"]
+  },
+  "xray": {
+    "version": "26.3.27",
+    "archive": "Xray-linux-64.zip",
+    "url": "https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-64.zip",
+    "sha256": "23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae",
+    "binary": "xray"
+  }
+}

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!--
+  Describes the pkexec elevation Aethon uses for its routing helper
+  (the aethon binary in routing-helper / repair-network mode). The
+  exec.path annotation binds this action to the packaged GUI binary
+  only, so the prompt names Aethon instead of showing generic pkexec
+  text. Defaults are auth_admin (ask every time, UAC-style); users who
+  want the password remembered for a few minutes can relax this locally
+  in /etc/polkit-1/rules.d - the package deliberately does not.
+-->
+<policyconfig>
+  <vendor>hamvex</vendor>
+  <vendor_url>https://github.com/hamvex/AetherGUI</vendor_url>
+
+  <action id="io.github.hamvex.aether-gui.routing-helper">
+    <description>Configure system-wide VPN routing</description>
+    <message>Administrator authentication is required for Aethon to create its TUN adapter and routing rules. Only Aethon-named network objects are created, and they are removed on disconnect.</message>
+    <icon_name>aethon</icon_name>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/bin/aethon</annotate>
+  </action>
+</policyconfig>

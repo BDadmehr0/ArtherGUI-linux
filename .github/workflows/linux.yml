@@ -1,0 +1,71 @@
+# Linux port CI: real compilation on Arch Linux.
+#
+# The port was authored in an environment without a Rust toolchain, so
+# this workflow is the reference build: it installs the same packages
+# the PKGBUILD declares, runs the pinned sidecar fetch (real upstream
+# downloads, digest-verified), the frontend suite, `cargo test
+# --locked`, and a full Tauri release build, then smoke-tests the
+# artefacts that can be exercised without a desktop or root networking.
+name: Linux (Arch)
+
+on:
+  push:
+    branches: ["arena/**", "main"]
+    paths:
+      - "src/**"
+      - "src-tauri/**"
+      - "scripts/**"
+      - "tests/**"
+      - "package.json"
+      - "package-lock.json"
+      - "PKGBUILD"
+      - "packaging/**"
+      - ".github/workflows/linux.yml"
+  workflow_dispatch:
+
+jobs:
+  arch-build:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Install toolchain (PKGBUILD makedepends + depends)
+        run: |
+          pacman -Syu --noconfirm \
+            base-devel git rust cargo nodejs npm \
+            webkit2gtk-4.1 gtk3 libayatana-appindicator librsvg \
+            polkit iproute2 nftables python unzip
+
+      - uses: actions/checkout@v4
+
+      - name: Frontend dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Fetch pinned Linux sidecars (digest-verified)
+        run: npm run fetch:linux
+
+      - name: Frontend test suite
+        run: npm test
+
+      - name: Rust unit tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+
+      - name: Full Tauri build (no bundling; PKGBUILD does the layout)
+        run: npm run build -- --no-bundle
+
+      - name: Smoke tests (no desktop, no root networking)
+        run: |
+          set -x
+          src-tauri/binaries/xray-x86_64-unknown-linux-gnu version | head -n 2
+          timeout 10 src-tauri/binaries/aether-x86_64-unknown-linux-gnu --help > /tmp/aether-help.txt 2>&1 || true
+          test -s /tmp/aether-help.txt && head -n 5 /tmp/aether-help.txt
+          # Repair with no Aethon state present must fail gracefully (exit 3)
+          # and touch nothing.
+          set +e
+          src-tauri/target/release/aether-gui --repair-network
+          code=$?
+          set -e
+          test "$code" -eq 3
+          file src-tauri/target/release/aether-gui
+
+      - name: PKGBUILD syntax
+        run: bash -n PKGBUILD scripts/fetch-core-linux.sh
